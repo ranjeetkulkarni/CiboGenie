@@ -3,6 +3,9 @@ import os
 import requests
 import logging
 import time
+import PyPDF2
+from sentence_transformers import SentenceTransformer
+import faiss
 from langchain_groq import ChatGroq
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import create_retrieval_chain
@@ -19,7 +22,7 @@ import folium
 from streamlit_folium import st_folium
 
 # Set up logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 # Load environment variables
 load_dotenv()
@@ -37,14 +40,6 @@ else:
 # Initialize Groq LLM
 llm = ChatGroq(groq_api_key=GROQ_API_KEY, model_name="llama3-8b-8192")
 
-
-# Token Counting Function
-def count_tokens(text):
-    """Count the number of tokens in the input text."""
-    enc = tiktoken.get_encoding("cl100k_base")
-    return len(enc.encode(text))
-
-
 # Safe Summarization Function
 def safe_summarize(content, token_limit=2000):
     """Summarize content to stay within token limits."""
@@ -53,12 +48,48 @@ def safe_summarize(content, token_limit=2000):
         return summarizer(content, max_length=300, min_length=50, do_sample=False)[0]['summary_text']
     return content
 
+# Token Counting Function
+def count_tokens(text):
+    """Count the number of tokens in the input text."""
+    enc = tiktoken.get_encoding("cl100k_base")
+    return len(enc.encode(text))
 
-# Wikipedia API Integration
+# Extract Text from Multiple PDFs
+def extract_text_from_pdfs(pdf_paths):
+    text = ""
+    for pdf_path in pdf_paths:
+        with open(pdf_path, 'rb') as file:
+            reader = PyPDF2.PdfReader(file)
+            for page in reader.pages:
+                text += page.extract_text()
+    return text
+
+# Generate Embeddings from Text
+def generate_embeddings(text):
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    chunks = text.split("\n")  # Split by line or chunk text however required
+    embeddings = model.encode(chunks)
+    return chunks, embeddings
+
+# Store Embeddings in FAISS Index
+def create_faiss_index(embeddings):
+    dim = embeddings.shape[1]
+    index = faiss.IndexFlatL2(dim)
+    index.add(embeddings)  # Add embeddings to the index
+    return index
+
+# Search for Relevant PDF Content
+def search_pdf(query, index, pdf_chunks):
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    query_embedding = model.encode([query])  # Encode the query
+    D, I = index.search(query_embedding, k=3)  # Get top 3 closest results
+    relevant_docs = [pdf_chunks[i] for i in I[0]]
+    return relevant_docs
+
+# Fetch Wikipedia Summary
 def fetch_wikipedia_summary(topic):
-    """Fetch a summary of a topic from Wikipedia."""
     try:
-        wiki_wiki = wikipediaapi.Wikipedia("en", user_agent="CiboGenie/1.0 (ranjeetkulkarni2505@gmail.com)")
+        wiki_wiki = wikipediaapi.Wikipedia("en", user_agent="CiboGenie/1.0")
         page = wiki_wiki.page(topic)
         if page.exists():
             return page.summary
@@ -68,10 +99,8 @@ def fetch_wikipedia_summary(topic):
         logging.error(f"Wikipedia API Error: {str(e)}")
         return "Error fetching data from Wikipedia."
 
-
-# SerpAPI Integration
+# Uses SERPAPI
 def fetch_google_results(query):
-    """Fetch top search results using SerpAPI."""
     try:
         url = f"https://serpapi.com/search.json?q={query}&api_key={SERP_API_KEY}"
         response = requests.get(url)
@@ -86,13 +115,19 @@ def fetch_google_results(query):
         logging.error(f"SerpAPI Error: {str(e)}")
         return "Error fetching data from SerpAPI."
 
+# Combine Context from Wikipedia and Google
+def hybrid_context_aggregation(wiki_summary, google_summary):
+    combined_context = ""
+    if wiki_summary and "No Wikipedia data" not in wiki_summary:
+        combined_context = f"Wikipedia: {wiki_summary} "
+    if google_summary and "No relevant Google search" not in google_summary:
+        combined_context += f"Google Search: {google_summary} "
+    return combined_context.strip() if combined_context.strip() else "Insufficient data from reliable sources."
 
-# Google Places API Integration
+# Google Maps API Integration for nearby places
 gmaps = googlemaps.Client(key=GOOGLE_PLACES_API_KEY)
 
-
 def fetch_nearby_places(food_item, user_location):
-    """Fetch top 3 nearby stores/restaurants selling the given food item."""
     try:
         places = gmaps.places_nearby(
             location=user_location,
@@ -104,12 +139,9 @@ def fetch_nearby_places(food_item, user_location):
         top_places = []
         for place in results[:5]:
             try:
-                # Extract geometry
                 location = place.get("geometry", {}).get("location", {})
                 if not location:
-                    continue  # Skip if geometry or location is missing
-                
-                # Add geometry to the response for compatibility with display_map
+                    continue
                 top_places.append({
                     "name": place.get("name", "Unknown"),
                     "address": place.get("vicinity", "Address not available"),
@@ -118,7 +150,7 @@ def fetch_nearby_places(food_item, user_location):
                         user_location,
                         (location.get("lat"), location.get("lng"))
                     ).km,
-                    "geometry": {"location": location}  # Include geometry for display_map
+                    "geometry": {"location": location}
                 })
             except Exception as inner_e:
                 logging.warning(f"Error processing place: {str(inner_e)}")
@@ -127,10 +159,8 @@ def fetch_nearby_places(food_item, user_location):
         logging.error(f"Google Places API Error: {str(e)}")
         return None
 
-
-# Display Interactive Map
+# Display Map with Nearby Places
 def display_map(places, user_coordinates):
-    """Display a map with nearby places."""
     m = folium.Map(location=user_coordinates, zoom_start=13)
     folium.Marker(
         location=user_coordinates,
@@ -142,51 +172,54 @@ def display_map(places, user_coordinates):
         if location:
             folium.Marker(
                 location=(location.get("lat"), location.get("lng")),
-                popup=f"{place.get('name', 'Unknown')} - {place.get('rating', 'No rating')}⭐",
+                popup=f"{place.get('name', 'Unknown')} - {place.get('rating', 'No rating')}\u2b50",
                 icon=folium.Icon(color="green")
             ).add_to(m)
     st_folium(m, width=700, height=500)
 
 
-# Build Prompt Template
+# Build Prompt Template for Groq LLM
+from langchain.prompts import ChatPromptTemplate
+
 def build_prompt_template():
     """Build prompt template for Groq LLM."""
     prompt = ChatPromptTemplate.from_template(
         """
-        Analyze the food item described below by providing a thorough, structured, and actionable breakdown. Focus on the following aspects:
+        Analyze the food item described below by providing a comprehensive, structured, and actionable breakdown. Focus on delivering precise and practical insights for each of the following aspects:
 
-        1. **Ingredients List**: Provide a serial list of all ingredients in the food item (5-10 items max)
-        2. **Safe Consumption Guidelines**: Specify the safe frequency of consumption per month (in terms of time) and suggest the safe quantity to be consumed per serving, measured explicitly in grams.
-        3. **Better Substitutes**: Suggest 2-3 healthier or more natural substitutes for the ingredients used in this food item that are readily available in the Indian market, keeping similar taste and texture in mind.
-        4. **Comparison with Similar Products**: Compare this food item with other similar products in the food industry, identifying strengths where this product performs better (e.g., flavor, nutritional profile, packaging) and weaknesses (both 1-2)
-        5. **Special Considerations**: Highlight any major dietary restrictions or health warnings, with a focus on common allergens and conditions requiring caution (e.g., diabetes, hypertension).
+        1. **Ingredients List**: 
+           - List all ingredients present in the food item, with quantities explicitly mentioned (5-10 ingredients max).
+           - For each ingredient, provide a brief description of any associated health risks or hazards, including allergens or substances that may cause reactions in sensitive individuals.
+        
+        2. **Safe Consumption Guidelines**: 
+           - Define the safe frequency of consumption for this food item on a monthly basis (e.g., how often it is safe to consume per month).
+           - Specify the recommended serving size in grams, ensuring it is within safe nutritional limits. Consider general health guidelines, caloric intake, and any special dietary needs.
+        
+        3. **Healthier Substitutes**:
+           - Suggest 2-3 healthier or more natural substitutes for the ingredients used in this food item, considering the flavor profile, texture, and overall nutritional value.
+           - The substitutes should be commonly available in the Indian market.
+        
+        4. **Comparison with Similar Products**:
+           - Compare this food item with 2-3 similar products in the market, highlighting strengths where it outperforms its competitors (e.g., better taste, superior nutritional content, better packaging).
+           - Identify at least one or two areas where this product falls short compared to similar products (e.g., cost, nutritional deficiencies, environmental impact).
+        
+        5. **Special Considerations**:
+           - Identify any dietary restrictions, health warnings, or conditions that require special attention (e.g., allergies, diabetes, hypertension).
+           - Focus on any ingredients or aspects that may pose a risk to specific consumer groups, and suggest alternatives where applicable.
+        
+        6. **Other Facts**:
+           - Provide any additional, relevant information about the product that hasn't been covered in the previous sections, with a focus on nutritional value, environmental impact, or unique features of the product.
 
         Context: {context}
         User Input: {input}
+
         Please provide a crisp and concise and structured analysis with clear, actionable insights based on the given input.
         """
     )
     return prompt
 
 
-# Streamlit UI
-import streamlit as st
-
-# Custom logo and title with the logo placed ahead of the title
-import streamlit as st
-
-# Custom logo and title with increased size
-import streamlit as st
-
-# Custom logo and title with increased size
-import streamlit as st
-
-# Custom logo and title with increased size
-# Display the image using st.image()
-
-
-# Custom title with larger size
-# Embed an SVG custom symbol using markdown
+# Streamlit Interface
 st.markdown("""
     <div style="display: flex; align-items: center;">
         <h1 style="font-size: 50px; margin-right: 10px;">Cibo-Genie</h1>
@@ -201,35 +234,39 @@ st.markdown("""
     and make healthier food choices. Just enter the food item or brand name, and let Cibo-Genie provide you 
     with detailed insights and recommendations! 🥗
 """)
-
-
-
-
-# Sidebar: Location input
+# Sidebar: Location Input
 st.sidebar.header("Configuration")
 location_input = st.sidebar.text_input("Enter your location (e.g., 'New Delhi, India'):", key="location_input")
 
-# Main content: Food item input and analysis
+# Main Content: Food Item Input and Analysis
 food_input = st.text_input("Enter a food item or brand name (e.g., 'Coca-Cola drink'):", key="food_input")
 
+# If food item is provided
 if food_input:
     try:
         start = time.process_time()
 
-        # Fetch data from Wikipedia
+        # Fetch relevant context from Wikipedia and Google using the RAG pipeline
         wiki_summary = fetch_wikipedia_summary(food_input)
         logging.debug(f"Wikipedia Summary: {wiki_summary}")
-
-        # Fetch data from Google (SerpAPI)
         google_summary = fetch_google_results(food_input)
         logging.debug(f"Google Search Summary: {google_summary}")
 
-        # Summarize content if too long
-        content = f"{wiki_summary} {google_summary}"
-        content = safe_summarize(content, token_limit=2000)
-        logging.debug(f"Summarized Content: {content}")
+        # Combine context from Wikipedia and Google
+        content = hybrid_context_aggregation(wiki_summary, google_summary)
+        # Extract PDF Content
+        pdf_paths = ["food_guide1.pdf", "food_guide2.pdf"]
+        pdf_text = extract_text_from_pdfs(pdf_paths)
+        pdf_chunks, pdf_embeddings = generate_embeddings(pdf_text)
+        pdf_index = create_faiss_index(pdf_embeddings)
 
-        # Build prompt
+        # Search relevant content in PDFs
+        pdf_search_results = search_pdf(food_input, pdf_index, pdf_chunks)
+        content += f" PDF Search Results: {', '.join(pdf_search_results)}"
+
+        content = safe_summarize(content, token_limit=3000)
+
+        # Build the prompt with the combined context
         prompt = build_prompt_template()
         context = {"context": content, "input": food_input}
 
@@ -239,11 +276,10 @@ if food_input:
         # Query Groq
         response = llm.invoke(formatted_prompt)
         logging.debug(f"Groq Response: {response}")
-
         # Extract only the content part of the response
         content = getattr(response, "content", "No content available.")
 
-        # Display the food analysis
+        # Display the food analysis result
         st.subheader("Analysis Result:")
         st.write(content)
 
@@ -252,12 +288,13 @@ if food_input:
         logging.info(f"Processing time: {elapsed_time:.2f} seconds.")
 
     except Exception as e:
-        logging.error(f"Error occurred: {str(e)}")
-        st.error("An error occurred. Please check the logs for more details.")
+        logging.error(f"Error during processing: {str(e)}")
+        st.error("An error occurred while processing the request.")
 else:
-    st.warning("Please enter a food item.")
+    st.write("Please enter a food item to analyze.")
 
-# If location input is given, fetch nearby places
+# Additional Features: Nearby Places and Map
+# Additional Features: Nearby Places and Map
 if location_input:
     geolocator = Nominatim(user_agent="ingredient-analysis")
     user_location = geolocator.geocode(location_input)

@@ -9,11 +9,16 @@ scikit-learn
 tiktoken
 python-dotenv
 beautifulsoup4
-faiss-cpu  # Use faiss-gpu if you're using GPU
+faiss-cpu
 geopy
 googlemaps
 wikipedia-api
 transformers
-torch  # Required for Hugging Face Transformers
+torch
 folium
 streamlit-folium
+PyPDF2
+pandas
+scipy
+numpy
+grpcio

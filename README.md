@@ -1,8 +1,8 @@
 # Cibo-Genie
 
-CiboGenie is a cutting-edge, AI-powered application that transforms traditional food analysis into an interactive, insightful experience. Whether you're a foodie, health-conscious individual, or professional in the food industry, CiboGenie provides structured and actionable breakdowns of food items, helping you make informed decisions about what you eat.
+CiboGenie is an AI-powered application designed to revolutionize food analysis. Whether you're a food enthusiast, health-conscious individual, or a professional in the food industry, CiboGenie provides interactive, actionable insights into food items. Using cutting-edge AI, CiboGenie analyzes food ingredients, recommends healthier substitutes, and helps you make informed decisions about what you eat.
 
-With integration to **Wikipedia**, **Google Search**, and advanced **AI models**, **CiboGenie** offers detailed insights on:
+With integrations to **Wikipedia**, **Google Search**, **SERP API**, **Groq API**, and advanced AI models, **CiboGenie** offers detailed insights on:
 
 - 🥗 **Food Ingredients**: In-depth analysis of food components.
 - ⚖️ **Safe Consumption Guidelines**: Ensures safe and healthy food consumption.
@@ -19,8 +19,8 @@ With integration to **Wikipedia**, **Google Search**, and advanced **AI models**
 - 🏪 **Nearest Shops Finder**: Allows users to input their location and find the nearest shops that sell the given food item.
 - 🌐 **Multi-Source Data Gathering**: Utilizes data from Wikipedia, Google, and other credible sources to provide well-rounded insights.
 - 🔧 **Customizable**: Designed to adapt to specific food items, ensuring tailored recommendations.
-
-
+- 🔄 **RAG Pipeline**: Uses a Retrieval-Augmented Generation (RAG) pipeline for improved and more accurate responses by leveraging external data sources such as Google Search, Wikipedia, and even PDFs to retrieve relevant content and provide detailed insights.
+  
 ---
 
 ## Technologies Used
@@ -32,6 +32,8 @@ With integration to **Wikipedia**, **Google Search**, and advanced **AI models**
 - *Wikipedia API*: To fetch detailed summaries and information about food items.
 - *Groq API*: For natural language processing and generating insights.
 - *Google Maps API*: For location-based services, including finding nearby stores.
+- *RAG Pipeline*: For improved performance by combining information retrieval with generative AI.
+- *PDFs*: Uses informative PDFs as data sources for food item analysis, enabling richer content to be processed and used for insights.
 
 ---
 
@@ -45,34 +47,34 @@ Before running CiboGenie, ensure you have the following:
 ### Steps to Set Up
 
 1. *Clone the repository:*
-    bash
+    ```bash
     git clone https://github.com/your-username/CiboGenie.git
     cd CiboGenie
-    
+    ```
 
 2. *Create and activate a virtual environment:*
-    bash
+    ```bash
     python -m venv cibogenv
     source cibogenv/bin/activate   # On Windows, use cibogenv\Scripts\activate
-    
+    ```
 
 3. *Install the required dependencies:*
-    bash
+    ```bash
     pip install -r requirements.txt
-    
+    ```
 
 4. *Set up the environment variables for API keys:*
-    - Create a .env file in the project root and add your keys:
-      env
+    - Create a `.env` file in the project root and add your keys:
+      ```env
       GOOGLE_API_KEY=your_google_api_key
       GROQ_API_KEY=your_groq_api_key
       GOOGLE_MAPS_API_KEY=your_google_maps_api_key
-      
+      ```
 
 5. *Run the application:*
-    bash
+    ```bash
     streamlit run app.py
-    
+    ```
 
 6. *Open the local URL* (usually [http://localhost:8501](http://localhost:8501)) in your browser to start using CiboGenie.
 
@@ -89,6 +91,12 @@ Before running CiboGenie, ensure you have the following:
     - Special Health Considerations
 3. *Add Your Location*: Input your location (city or area) to find the nearest shops where you can purchase the food item.
 4. *Explore Further*: Browse through recommendations for better alternatives and dietary tips.
+
+---
+
+### **Customizable Token Limit**
+- The token limit for the RAG pipeline is set at **3000 tokens** by default. This value can be adjusted by the user to optimize performance based on their specific use case or application.
+    - To adjust the token limit, you can modify the `max_tokens` parameter in the configuration file or directly in the pipeline settings in the application code.
 
 ---
 
@@ -125,10 +133,7 @@ We welcome contributions to make CiboGenie even better! Here’s how you can hel
 
 ## License
 
-## License
-
 This project is licensed under the **GNU General Public License** (GPL) **Version 3, 29 June 2007**. See the [LICENSE](LICENSE) file for details.
-
 
 ---
 
@@ -142,4 +147,4 @@ For any inquiries or feedback, feel free to reach out:
 
 ---
 
-Thank you for using CiboGenie! We hope it makes your food analysis journey both insightful and exciting.
+Thank you for using CiboGenie! We hope it makes your food analysis journey both insightful and exciting.
