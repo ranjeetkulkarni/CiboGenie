@@ -1,0 +1,19 @@
+streamlit
+requests
+langchain
+langchain-groq
+langchain-community
+langchain-core
+sentence-transformers
+scikit-learn
+tiktoken
+python-dotenv
+beautifulsoup4
+faiss-cpu  # Use faiss-gpu if you're using GPU
+geopy
+googlemaps
+wikipedia-api
+transformers
+torch  # Required for Hugging Face Transformers
+folium
+streamlit-folium
