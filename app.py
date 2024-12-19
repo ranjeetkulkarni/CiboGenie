@@ -99,7 +99,7 @@ def fetch_wikipedia_summary(topic):
         logging.error(f"Wikipedia API Error: {str(e)}")
         return "Error fetching data from Wikipedia."
 
-# Uses SERPAPI
+# Fetch Google Results
 def fetch_google_results(query):
     try:
         url = f"https://serpapi.com/search.json?q={query}&api_key={SERP_API_KEY}"
@@ -177,10 +177,7 @@ def display_map(places, user_coordinates):
             ).add_to(m)
     st_folium(m, width=700, height=500)
 
-
 # Build Prompt Template for Groq LLM
-from langchain.prompts import ChatPromptTemplate
-
 def build_prompt_template():
     """Build prompt template for Groq LLM."""
     prompt = ChatPromptTemplate.from_template(
@@ -218,15 +215,13 @@ def build_prompt_template():
     )
     return prompt
 
-
 # Streamlit Interface
 st.markdown("""
     <div style="display: flex; align-items: center;">
         <h1 style="font-size: 50px; margin-right: 10px;">Cibo-Genie</h1>
-        <img src="images/logo.png" width="100" style="margin-right: 10px;">
+        
     </div>
 """, unsafe_allow_html=True)
-
 
 # Add a short description below the title
 st.markdown("""
@@ -234,26 +229,33 @@ st.markdown("""
     and make healthier food choices. Just enter the food item or brand name, and let Cibo-Genie provide you 
     with detailed insights and recommendations! 🥗
 """)
+
 # Sidebar: Location Input
 st.sidebar.header("Configuration")
 location_input = st.sidebar.text_input("Enter your location (e.g., 'New Delhi, India'):", key="location_input")
 
-# Main Content: Food Item Input and Analysis
-food_input = st.text_input("Enter a food item or brand name (e.g., 'Coca-Cola drink'):", key="food_input")
+# Main Content
+st.subheader("Food Analysis and General Questions")
 
-# If food item is provided
+# Small Input Field: Food Analysis
+food_input = st.text_input("Enter a food item for detailed analysis (e.g., 'Coca-Cola drink'):", key="food_input")
+
+# Larger Input Field: General Questions
+# Larger Input Field: General Questions
+general_query = st.text_area("Have a general food-related question? Ask here:", key="general_query")
+
+# If user provides a food item for analysis
 if food_input:
     try:
-        start = time.process_time()
+        start_time = time.process_time()
 
-        # Fetch relevant context from Wikipedia and Google using the RAG pipeline
+        # Fetch relevant context from Wikipedia and Google using RAG
         wiki_summary = fetch_wikipedia_summary(food_input)
-        logging.debug(f"Wikipedia Summary: {wiki_summary}")
         google_summary = fetch_google_results(food_input)
-        logging.debug(f"Google Search Summary: {google_summary}")
 
         # Combine context from Wikipedia and Google
         content = hybrid_context_aggregation(wiki_summary, google_summary)
+
         # Extract PDF Content
         pdf_paths = ["food_guide1.pdf", "food_guide2.pdf"]
         pdf_text = extract_text_from_pdfs(pdf_paths)
@@ -264,53 +266,94 @@ if food_input:
         pdf_search_results = search_pdf(food_input, pdf_index, pdf_chunks)
         content += f" PDF Search Results: {', '.join(pdf_search_results)}"
 
+        # Summarize content to fit within token limit
         content = safe_summarize(content, token_limit=3000)
 
-        # Build the prompt with the combined context
+        # Build prompt and query the LLM
         prompt = build_prompt_template()
         context = {"context": content, "input": food_input}
-
-        # Format and pass context properly
         formatted_prompt = prompt.format_prompt(**context).to_string()
 
-        # Query Groq
         response = llm.invoke(formatted_prompt)
-        logging.debug(f"Groq Response: {response}")
-        # Extract only the content part of the response
-        content = getattr(response, "content", "No content available.")
+        analysis_result = getattr(response, "content", "No content available.")
 
-        # Display the food analysis result
-        st.subheader("Analysis Result:")
-        st.write(content)
+        # Display the analysis result
+        st.subheader("Detailed Analysis Result:")
+        st.write(analysis_result)
 
-        end = time.process_time()
-        elapsed_time = end - start
+        elapsed_time = time.process_time() - start_time
         logging.info(f"Processing time: {elapsed_time:.2f} seconds.")
 
     except Exception as e:
-        logging.error(f"Error during processing: {str(e)}")
-        st.error("An error occurred while processing the request.")
-else:
-    st.write("Please enter a food item to analyze.")
+        logging.error(f"Error during food analysis: {str(e)}")
+        st.error("An error occurred while analyzing the food item.")
 
-# Additional Features: Nearby Places and Map
-# Additional Features: Nearby Places and Map
+# If user provides a general query
+if general_query:
+    try:
+        start_time = time.process_time()
+
+        # Fetch context from Wikipedia and Google
+        wiki_summary = fetch_wikipedia_summary(general_query)
+        google_summary = fetch_google_results(general_query)
+
+        # Combine context and summarize if needed
+        content = hybrid_context_aggregation(wiki_summary, google_summary)
+        content = safe_summarize(content, token_limit=2000)
+
+        # Use the LLM to answer the general question
+        general_prompt = ChatPromptTemplate.from_template(
+            """
+            Analyze the following query in a concise and comprehensive manner. Provide actionable insights, 
+            useful examples, and references when applicable.
+            
+            Context: {context}
+            User Query: {query}
+            
+            Please respond with structured, user-friendly information.
+            """
+        )
+        context = {"context": content, "query": general_query}
+        formatted_prompt = general_prompt.format_prompt(**context).to_string()
+
+        response = llm.invoke(formatted_prompt)
+        general_response = getattr(response, "content", "No content available.")
+
+        # Display the response
+        st.subheader("Response to Your Question:")
+        st.write(general_response)
+
+        elapsed_time = time.process_time() - start_time
+        logging.info(f"Processing time: {elapsed_time:.2f} seconds.")
+
+    except Exception as e:
+        logging.error(f"Error during general query processing: {str(e)}")
+        st.error("An error occurred while processing your query.")
+
+# Sidebar: Location-Based Suggestions
 if location_input:
-    geolocator = Nominatim(user_agent="ingredient-analysis")
-    user_location = geolocator.geocode(location_input)
-    if user_location:
-        user_coordinates = (user_location.latitude, user_location.longitude)
-        # Fetch nearby places
-        nearby_places = fetch_nearby_places(food_input, user_coordinates)
-        if nearby_places:
-            st.sidebar.subheader("Nearby Stores/Restaurants:")
-            for i, place in enumerate(nearby_places, 1):
-                st.sidebar.write(f"**{i}. {place['name']}**")
-                st.sidebar.write(f"   - Address: {place['address']}")
-                st.sidebar.write(f"   - Rating: {place['rating']}")
-                st.sidebar.write(f"   - Distance: {place['distance']:.2f} km")
-            display_map(nearby_places, user_coordinates)
+    try:
+        geolocator = Nominatim(user_agent="ingredient-analysis")
+        user_location = geolocator.geocode(location_input)
+
+        if user_location:
+            user_coordinates = (user_location.latitude, user_location.longitude)
+            # Fetch nearby places
+            nearby_places = fetch_nearby_places(food_input, user_coordinates) if food_input else []
+
+            if nearby_places:
+                st.sidebar.subheader("Nearby Stores/Restaurants:")
+                for i, place in enumerate(nearby_places, 1):
+                    st.sidebar.write(f"**{i}. {place['name']}**")
+                    st.sidebar.write(f"   - Address: {place['address']}")
+                    st.sidebar.write(f"   - Rating: {place['rating']}")
+                    st.sidebar.write(f"   - Distance: {place['distance']:.2f} km")
+                display_map(nearby_places, user_coordinates)
+            else:
+                st.sidebar.warning("No nearby stores/restaurants found.")
         else:
-            st.sidebar.warning("No nearby stores/restaurants found.")
-    else:
-        st.sidebar.warning("Location not found. Please check your input.")
+            st.sidebar.warning("Location not found. Please check your input.")
+    except Exception as e:
+        logging.error(f"Error during location-based suggestions: {str(e)}")
+        st.sidebar.error("An error occurred while fetching location-based suggestions.")
+
